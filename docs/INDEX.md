@@ -87,3 +87,5 @@ Os guias são mapas de navegação, não novas cópias dos contratos técnicos. 
 - [Windows native-save durability](windows-save-durability.md)
 - [GIMP XCF documents](xcf.md)
 - [Native save writer reuse](zstd-workspaces-performance.md)
+
+- [Creative Workshop: origem, identidade e publicação](branding.md)

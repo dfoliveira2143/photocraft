@@ -459,7 +459,7 @@
 	Artboard Guides	Rajztábla-segédvonalak
 	Artboards to Files	Rajztáblák fájlokba
 	Artboards to PDF	Rajztáblák PDF-be
-	ArtCraft Website	ArtCraft-weboldal
+	Creative Workshop Website	Creative Workshop-weboldal
 	Average	Átlag
 	Background From Layer	Háttér a rétegből
 	Bitmap…	Bittérkép…
@@ -625,8 +625,8 @@
 	Internet Standard RGB	Internetes szabványos RGB
 	Inverse	Megfordítás
 	Iris Blur…	Íriszelmosás…
-	Join the ArtCraft Discord	Csatlakozás az ArtCraft Discordhoz
-	Join the ArtCraft Discord…	Csatlakozás az ArtCraft Discordhoz…
+	Project support	Csatlakozás az Creative Workshop GitHubhoz
+	Project support…	Csatlakozás az Creative Workshop GitHubhoz…
 	Language	Nyelv
 	Language Options	Nyelvi beállítások
 	Large	Nagy
@@ -1845,7 +1845,7 @@ layerLabel	Magenta	Bíbor
 	Intersect with	Metszet ezzel
 	Intersect with selection  ({key})	Metszet a kijelöléssel  ({key})
 	Invalid panel layout; restored the default dock	Érvénytelen panelelrendezés; az alapértelmezett dokkolás visszaállítva
-	Join the ArtCraft Discord ({url})	Csatlakozz az ArtCraft Discord-szerveréhez ({url})
+	Project support ({url})	Csatlakozz az Creative Workshop GitHub-szerveréhez ({url})
 	Keyboard Shortcuts	Billentyűparancsok
 	Kind	Fajta
 	Lasso	Lasszó
@@ -3085,7 +3085,7 @@ cameraRaw	Yellow	Sárga
 	Arch	Boltív
 	Area	Terület
 	Artboard Tool	Rajztábla
-	ArtCraft	ArtCraft
+	Creative Workshop	Creative Workshop
 	Ask	Rákérdezés
 	Aspect Ratio	Oldalarány
 	Assign Profile	Profil hozzárendelése
@@ -3344,7 +3344,7 @@ cameraRaw	Yellow	Sárga
 	Interpret Footage	Videoanyag értelmezése
 	Interval	Intervallum
 	Invalid {mode} profile	Érvénytelen profil ({mode})
-	Join us on Discord	Csatlakozz hozzánk a Discordon
+	Project support	Csatlakozz hozzánk a Discordon
 	Keep Using CPU	Marad a CPU
 	Kernel	Szűrőmag
 	Keyboard	Billentyűzet

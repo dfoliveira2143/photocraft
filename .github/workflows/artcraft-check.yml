@@ -1,0 +1,235 @@
+name: Artcraft checks
+on:
+  workflow_dispatch: {}
+permissions:
+  contents: read
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+  # No test or fuzz run may print a page: the engine refuses to spool, and if something ever
+  # bypasses that, lp fails loudly on a printer that does not exist.
+  PHOTOCRAFT_NO_PRINT: '1'
+  LPDEST: photocraft-no-such-printer
+
+# A newer push to a PR branch cancels its older run. Every push to main gets a run of its own that
+# is never cancelled, so each state of main is checked to the end. Adding any label but `full-ci`
+# gets a group of its own, so it neither runs anything nor cancels a run.
+concurrency:
+  group: artcraft-check-${{ github.ref }}
+  cancel-in-progress: false
+jobs:
+  gate:
+    name: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    permissions:
+      contents: read
+    env:
+      CARGO_TERM_COLOR: always
+      CARGO_INCREMENTAL: '0'
+      CARGO_NET_RETRY: '10'
+      RUST_BACKTRACE: '1'
+      PHOTOCRAFT_NO_PRINT: '1'
+      LPDEST: photocraft-no-such-printer
+      CRAFT_FONTS_DIR: ${{ github.workspace }}/craft-fonts
+      CRAFT_FONTS_REQUIRED: '1'
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        persist-credentials: false
+    - name: Pinned official fonts
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      with:
+        repository: storytold/craft-fonts
+        ref: b076417b5880bd4154bd22f00695b1d28c6bea83
+        path: craft-fonts
+        persist-credentials: false
+    - name: Pinned translation setup
+      uses: storytold/craft-common-actions/actions/checkout-craft-i18n@8bb4e5ab95443171104ad88113fe1ef9b0e5ce3f
+    - name: Linux dependencies (no persistent cache)
+      env:
+        PACKAGES: libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libgtk-3-dev
+      run: "sudo apt-get update\nsudo apt-get install -y --no-install-recommends $PACKAGES\n"
+    - name: Rust with formatting, Clippy and WebAssembly
+      shell: bash
+      run: "set -euo pipefail\nchannel=stable\nif [ -f rust-toolchain.toml ]; then\n  channel=$(python3 -c 'import tomllib;
+        print(tomllib.load(open(\"rust-toolchain.toml\", \"rb\"))[\"toolchain\"][\"channel\"])')\nfi\nrustup toolchain install
+        \"$channel\" --profile minimal --component clippy --component rustfmt --target wasm32-unknown-unknown\nrustup default
+        \"$channel\"\n"
+    - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283
+      with:
+        tool: cargo-nextest@0.9.150
+    - name: Official project quality gate
+      shell: bash
+      run: cargo xtask ci
+    - name: Lockfile unchanged
+      run: git diff --exit-code -- Cargo.lock
+  platforms:
+    if: github.event.action != 'labeled' || github.event.label.name == 'full-ci'
+    timeout-minutes: 90
+    name: select platforms
+    runs-on: ubuntu-24.04
+    outputs:
+      windows: ${{ steps.pick.outputs.windows }}
+      web: ${{ steps.pick.outputs.web }}
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+    - name: Git dependencies come from storytold
+      run: |
+        set -euo pipefail
+        test -f Cargo.lock || { echo "Cargo.lock is missing"; exit 1; }
+        # Source replacement, patches and path overrides in cargo config never show up
+        # in Cargo.lock. Parsed rather than grepped: TOML has many spellings of one key.
+        # Cargo still reads the legacy .cargo/config.
+        python3 - <<'PY'
+        import os, sys, tomllib
+        for path in (".cargo/config", ".cargo/config.toml"):
+            if not os.path.exists(path):
+                continue
+            config = tomllib.load(open(path, "rb"))
+            replaced = [name for name, source in config.get("source", {}).items()
+                        if isinstance(source, dict) and "replace-with" in source]
+            if replaced or "patch" in config or "paths" in config:
+                print(f"{path} replaces, patches or overrides a source")
+                sys.exit(1)
+        PY
+        # Fails when Cargo.lock is out of date with the manifests.
+        cargo metadata --locked --format-version 1 > /dev/null
+        python3 - <<'PY'
+        import sys, tomllib
+        lock = tomllib.load(open("Cargo.lock", "rb"))
+        bad = sorted({p["source"] for p in lock.get("package", [])
+                      if p.get("source", "").startswith("git+")
+                      and not p["source"].startswith("git+https://github.com/storytold/")})
+        if bad:
+            print("Git dependencies outside github.com/storytold:", *bad, sep="\n")
+            sys.exit(1)
+        PY
+    - id: pick
+      env:
+        EVENT: ${{ github.event_name }}
+        BASE: ${{ github.event.pull_request.base.sha }}
+        FULL: ${{ contains(github.event.pull_request.labels.*.name, 'full-ci') }}
+      run: |
+        if [ "$EVENT" != pull_request ] || [ "$FULL" = true ]; then
+          echo "windows=true" >> "$GITHUB_OUTPUT"
+          echo "web=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        # The browser build (a fat-LTO wasm build) runs only when something it compiles or
+        # packages changed: the web app and its packaging, crate sources and manifests (the web
+        # build compiles nearly every crate), the workspace manifests and this workflow.
+        if git diff --name-only "$BASE" HEAD | grep -Eq '^(apps/photocraft-web(-boot)?/|packaging/web/|packaging/env\.sh$|crates/[^/]+/(src/|Cargo\.toml$|build\.rs$)|Cargo\.(toml|lock)$|rust-toolchain(\.toml)?$|\.github/workflows/ci\.yml$)'; then
+          echo "web=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "web=false" >> "$GITHUB_OUTPUT"
+        fi
+        if git diff --name-only "$BASE" HEAD | grep -Eq '^(apps/|crates/(ui-egui|text|gpu|tablet|heif|format)/|Cargo\.lock$|(.*/)?build\.rs$|\.github/workflows/ci\.yml$)'; then
+          echo "windows=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "windows=false" >> "$GITHUB_OUTPUT"
+        fi
+
+  # The Linux gate. Its rust-cache entry is the one `test (without heif)` restores.
+  test-without-heif:
+    if: github.event.action != 'labeled' || github.event.label.name == 'full-ci'
+    timeout-minutes: 90
+    name: test (without heif)
+    # The gate's runner: its cache entry is keyed on the OS.
+    runs-on: ubuntu-24.04
+    env:
+      # The gate sets these; rust-cache hashes CARGO_* and RUST* variables into its key.
+      CARGO_INCREMENTAL: 0
+      CARGO_NET_RETRY: 10
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      with:
+        persist-credentials: false
+
+    - name: Linux dependencies
+      env:
+        PACKAGES: libxkbcommon-dev libwayland-dev libx11-dev libxrandr-dev libxi-dev libgl1-mesa-dev libgtk-3-dev
+      run: "sudo apt-get update\nsudo apt-get install -y --no-install-recommends $PACKAGES\n"
+    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec   # stable
+
+      # gate.yml keys its cache `<cache-version>-rust-<hash of Cargo.toml>-gate`.
+    - uses: taiki-e/install-action@8cca0918f8471c33515202b73f56ab27f2bed283   # v2.87.29
+      with:
+        tool: cargo-nextest@0.9.150
+
+    - name: Test without heif
+      run: cargo nextest run -p photocraft-heif -p photocraft-codecs -p photocraft-io --locked --profile ci
+
+  corpus:
+    if: github.event.action != 'labeled' || github.event.label.name == 'full-ci'
+    timeout-minutes: 90
+    # Real-file corpus tests (cargo feature `corpus`), on every PR and on main. The corpora are
+    # pinned in xtask/src/corpus_pins.rs and sha256-verified (xtask/*.sha256) after both a cache
+    # restore and a download; a missing corpus fails the tests. The cache key changes only when a
+    # pin or manifest does, so normally this restores in seconds (fork PRs read the base cache).
+    name: corpus tests
+    runs-on: ubuntu-24.04
+    env:
+      # test-corpus builds with --release, but here without the release profile's thin LTO and
+      # single codegen unit: they ran LTO over the dependency graph for each of the ~95 corpus test
+      # binaries, so building took 23.5 of the job's 37 minutes while the tests ran for 1.5.
+      # Turning them off builds 2.7x faster; the code under test is the same.
+      CARGO_PROFILE_RELEASE_LTO: 'false'
+      CARGO_PROFILE_RELEASE_CODEGEN_UNITS: '16'
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec   # stable
+    - name: Fetch and verify corpora
+      run: cargo xtask corpus --all
+    - name: Corpus tests
+      run: cargo xtask test-corpus
+
+  web:
+    timeout-minutes: 90
+    name: web build and wasm size gate
+    # PRs run it only when web-relevant files change (see `platforms`); main always does.
+    needs: platforms
+    if: needs.platforms.outputs.web == 'true'
+    runs-on: ubuntu-24.04
+    env:
+      # Match release.yml so PR results reflect what would actually ship.
+      TRUNK_VERSION: 0.21.14
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+      with:
+        persist-credentials: false
+    - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec   # stable
+      with:
+        targets: wasm32-unknown-unknown
+    - name: Install trunk
+      run: |
+        curl --proto '=https' -fsSL "https://github.com/trunk-rs/trunk/releases/download/v${TRUNK_VERSION}/trunk-x86_64-unknown-linux-gnu.tar.gz" \
+          | tar -xz -C "$HOME/.cargo/bin" trunk
+        trunk --version
+      # package.sh runs Trunk's release builds, validates relative URLs, cuts the wasm into
+      # parts, checks the 24 MiB per-file limit and exercises the packaging step release.yml uses.
+    - name: Build and verify browser release
+      run: packaging/web/package.sh
+    - name: Report wasm size
+      if: success()
+      run: |
+        {
+          echo "### Browser WebAssembly size"
+          echo
+          echo "| File | Bytes | MiB | Limit |"
+          echo "| --- | ---: | ---: | ---: |"
+          row() { echo "| $1 | $2 | $(awk -v n="$2" 'BEGIN { printf "%.2f", n / 1048576 }') | $3 |"; }
+          # The app's wasm as built; it ships gzipped in parts, so only the download grows with it.
+          for wasm in dist/web/*.wasm; do
+            [ -f "$wasm" ] || continue
+            row "$(basename "$wasm")" "$(wc -c < "$wasm" | tr -d ' ')" "none"
+          done
+          # What a host sees: the largest file of the packaged site.
+          largest=$(find target/web-package -type f -printf '%s %f\n' | sort -n | tail -1)
+          row "largest file in the site: ${largest#* }" "${largest%% *}" "24 MiB"
+        } >> "$GITHUB_STEP_SUMMARY"

@@ -544,8 +544,8 @@
 	PhotoCraft Website	Сайт PhotoCraft
 	PhotoCraft on GitHub	PhotoCraft на GitHub
 	Report an Issue…	Сообщить о проблеме…
-	ArtCraft Website	Сайт ArtCraft
-	Join the ArtCraft Discord…	Discord сообщества ArtCraft…
+	Creative Workshop Website	Сайт Creative Workshop
+	Project support…	GitHub сообщества Creative Workshop…
 	System Info…	Информация о системе…
 
 # Tools and options bar
@@ -1693,9 +1693,9 @@
 	Preserve Transparency	Сохранить прозрачность
 	Reverse	Обратить
 	Align with layer	По слою
-	Join us on Discord	Мы в Discord
+	Project support	Мы в Discord
 	PhotoCraft website	Сайт PhotoCraft
-	ArtCraft	ArtCraft
+	Creative Workshop	Creative Workshop
 	GitHub	GitHub
 	No character style	Нет стиля символов
 	No author	Нет автора
@@ -3956,8 +3956,8 @@ curves	Smooth	Сгладить
 	Iris Blur	Диафрагменное размытие
 	Ivy	Плющ
 	Jag	Зубчатость
-	Join the ArtCraft Discord	Discord сообщества ArtCraft
-	Join the ArtCraft Discord ({url})	Присоединиться к Discord ArtCraft ({url})
+	Project support	GitHub сообщества Creative Workshop
+	Project support ({url})	Присоединиться к GitHub Creative Workshop ({url})
 	Keeps the current texture when switching presets.	Сохраняет текущую текстуру при смене набора.
 	Kernel	Ядро
 	Kerning: Metrics, Optical or a value in 1/1000 em (Alt+←/→ at the caret)	Кернинг: метрический, оптический или значение в 1/1000 em (Alt+←/→ у курсора)

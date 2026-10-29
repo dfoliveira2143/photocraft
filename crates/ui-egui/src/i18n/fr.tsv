@@ -793,8 +793,8 @@
 	About PhotoCraft	À propos de PhotoCraft
 	PhotoCraft Website	Site web de PhotoCraft
 	PhotoCraft on GitHub	PhotoCraft sur GitHub
-	ArtCraft Website	Site web d'ArtCraft
-	Join the ArtCraft Discord…	Rejoindre le Discord d'ArtCraft…
+	Creative Workshop Website	Site web d'Creative Workshop
+	Project support…	Rejoindre le GitHub d'Creative Workshop…
 	Report an Issue…	Signaler un problème…
 	WIA Support…	Prise en charge de WIA…
 	Apply	Appliquer
@@ -1209,7 +1209,7 @@
 	Invert All	Tout inverser
 	Invert has no settings.	Inverser n'a aucun réglage.
 	Italic	Italique
-	Join us on Discord	Rejoignez-nous sur Discord
+	Project support	Rejoignez-nous sur Discord
 	Justify all	Justifier tout
 	Justify last centered	Justifier, dernière ligne centrée
 	Justify last left	Justifier, dernière ligne à gauche
@@ -1614,7 +1614,7 @@
 	Apple Watch 45mm	Apple Watch 45 mm
 	Aqua	Aqua
 	Art & Illustration	Art et illustration
-	ArtCraft	ArtCraft
+	Creative Workshop	Creative Workshop
 	Background Eraser Tool	Outil Gomme d'arrière-plan
 	Bevel & Emboss	Biseau et relief
 	Blend Mode	Mode de fusion
@@ -3884,8 +3884,8 @@ curves	Smooth	Lisser
 	Iris Blur	Flou d'iris
 	Ivy	Lierre
 	Jag	Dentelé
-	Join the ArtCraft Discord	Rejoindre le Discord d'ArtCraft
-	Join the ArtCraft Discord ({url})	Rejoindre le Discord d'ArtCraft ({url})
+	Project support	Rejoindre le GitHub d'Creative Workshop
+	Project support ({url})	Rejoindre le GitHub d'Creative Workshop ({url})
 	Kernel	Noyau
 	Kerning: Metrics, Optical or a value in 1/1000 em (Alt+←/→ at the caret)	Crénage : Métriques, Optique ou une valeur en 1/1000 em (Alt+←/→ au point d'insertion)
 	Keyboard	Clavier

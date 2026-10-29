@@ -809,8 +809,8 @@
 	About PhotoCraft	O aplikaci PhotoCraft
 	PhotoCraft Website	Web PhotoCraft
 	PhotoCraft on GitHub	PhotoCraft na GitHubu
-	ArtCraft Website	Web ArtCraft
-	Join the ArtCraft Discord…	Připojit se k Discordu ArtCraft…
+	Creative Workshop Website	Web Creative Workshop
+	Project support…	Připojit se k GitHubu Creative Workshop…
 	Report an Issue…	Nahlásit problém…
 	WIA Support…	Podpora WIA…
 	Apply	Použít
@@ -1240,7 +1240,7 @@
 	Invert All	Invertovat vše
 	Invert has no settings.	Invertovat nemá žádná nastavení.
 	Italic	Kurzíva
-	Join us on Discord	Přidejte se k nám na Discordu
+	Project support	Přidejte se k nám na Discordu
 	Justify all	Do bloku vše
 	Justify last centered	Do bloku, poslední řádek na střed
 	Justify last left	Do bloku, poslední řádek vlevo
@@ -1651,7 +1651,7 @@
 	Apple Watch 45mm	Apple Watch 45 mm
 	Aqua	Akvamarínové
 	Art & Illustration	Umění a ilustrace
-	ArtCraft	ArtCraft
+	Creative Workshop	Creative Workshop
 	Background Eraser Tool	Nástroj guma pozadí
 	Bevel & Emboss	Úkos a reliéf
 	Blend Mode	Režim prolnutí
@@ -3789,7 +3789,7 @@ navigator	Zoom	Zvětšení
 	on	zapnuto
 	off	vypnuto
 	This adjustment ({key}) is kept as imported and can't be edited yet.	Tato úprava ({key}) se uchovává v importované podobě a zatím ji nelze měnit.
-	Join the ArtCraft Discord ({url})	Přidejte se na Discord ArtCraft ({url})
+	Project support ({url})	Přidejte se na GitHub Creative Workshop ({url})
 	{index} of {total}	{index} z {total}
 @plural	{n} step|{n} steps	{n} krok|{n} kroky|{n} kroků
 	{shortcut} assigned.	Zkratka {shortcut} přiřazena.

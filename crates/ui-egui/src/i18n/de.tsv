@@ -798,8 +798,8 @@
 	About PhotoCraft	Über PhotoCraft
 	PhotoCraft Website	PhotoCraft-Website
 	PhotoCraft on GitHub	PhotoCraft auf GitHub
-	ArtCraft Website	ArtCraft-Website
-	Join the ArtCraft Discord…	ArtCraft-Discord beitreten…
+	Creative Workshop Website	Creative Workshop-Website
+	Project support…	Creative Workshop-GitHub beitreten…
 	Report an Issue…	Problem melden…
 	WIA Support…	WIA-Unterstützung…
 	Apply	Anwenden
@@ -1224,7 +1224,7 @@
 	Invert All	Alle invertieren
 	Invert has no settings.	Invertieren hat keine Einstellungen.
 	Italic	Kursiv
-	Join us on Discord	Tritt unserem Discord bei
+	Project support	Tritt unserem Discord bei
 	Justify all	Alles im Blocksatz
 	Justify last centered	Letzte Zeile zentriert
 	Justify last left	Letzte Zeile links
@@ -1631,7 +1631,7 @@
 	Apple Watch 45mm	Apple Watch 45 mm
 	Aqua	Aqua
 	Art & Illustration	Kunst & Illustration
-	ArtCraft	ArtCraft
+	Creative Workshop	Creative Workshop
 	Background Eraser Tool	Hintergrund-Radiergummi-Werkzeug
 	Bevel & Emboss	Abgeflachte Kante & Relief
 	Blend Mode	Fusionsmodus
@@ -2852,7 +2852,7 @@ curves	Smooth	Glätten
 	Light Gray	Hellgrau
 	Stop	Stopp
 # Status messages, system info and tool names
-	Join the ArtCraft Discord ({url})	Dem ArtCraft-Discord beitreten ({url})
+	Project support ({url})	Dem Creative Workshop-GitHub beitreten ({url})
 	Nothing to paste: the clipboard holds no image	Nichts einzufügen: Die Zwischenablage enthält kein Bild
 	Graphics adapter: {adapter}	Grafikadapter: {adapter}
 	Backend: {backend} ({type})	Backend: {backend} ({type})
