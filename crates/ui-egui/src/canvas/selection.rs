@@ -1,5 +1,5 @@
 use super::tool_input::selection_drag_kind;
-use super::*;
+use super::{PhotocraftApp, Tool, json};
 
 /// Photoshop's cursor over a selection: what a press (or the drag under way) would do.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -96,7 +96,7 @@ pub(super) fn finish_selection_drag(app: &mut PhotocraftApp, floating: bool, sta
         (false, true) if app.session.is_enabled("select.deselect") => app.run("select.deselect", json!({})),
         (false, true) => return,
         (true, false) => app.run("select.float", json!({"dx": dx, "dy": dy})),
-        (false, false) => app.run("select.transformSelection", json!({"dx": dx, "dy": dy})),
+        (false, false) => app.run("select.transformSelection", json!({"dx": dx, "dy": dy, "stepName": "Move Selection"})),
     };
     if let Err(e) = r {
         app.ui.status = e;
