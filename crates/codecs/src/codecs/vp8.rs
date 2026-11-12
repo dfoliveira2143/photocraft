@@ -19,7 +19,11 @@ mod transform;
 
 use bool_encoder::BoolEncoder;
 use predict::{Plane, SubEdges, predict_block, predict_sub};
-use tables::*;
+use tables::{
+    AC_QLOOKUP, B_DC_PRED, B_HE_PRED, B_PRED, B_TM_PRED, B_VE_PRED, BMODE_TREE, CAT_BASE, COEFF_BANDS, COEFF_TREE, COEFF_UPDATE_PROBS, DC_PRED, DC_QLOOKUP,
+    DCT_0, DCT_1, DCT_2, DCT_3, DCT_4, DCT_CAT1, DCT_CAT2, DCT_CAT3, DCT_CAT4, DCT_CAT5, DCT_CAT6, DCT_EOB, DEFAULT_COEFF_PROBS, H_PRED, KF_BMODE_PROBS,
+    KF_UV_MODE_PROB, KF_YMODE_PROB, KF_YMODE_TREE, PCAT, TM_PRED, UV_MODE_TREE, V_PRED, ZIGZAG,
+};
 use transform::{fdct, fwht, idct, iwht};
 
 /// The largest dimension a VP8 frame header can hold (14 bits).
@@ -353,130 +357,8 @@ impl<'a> Encoder<'a> {
             .sum()
     }
 
-    // Sub-block indices address several arrays by geometry; ranges read better than iterators here.
-    #[allow(clippy::needless_range_loop)]
-    fn encode_macroblock(&mut self, mbx: usize, mby: usize) {
-        let (x0, y0) = (mbx * 16, mby * 16);
-        // Source luma of this macroblock.
-        let mut src = [0i32; 256];
-        for r in 0..16 {
-            for c in 0..16 {
-                src[r * 16 + c] = self.src_y(x0 + c, y0 + r);
-            }
-        }
-        // Whole-block luma modes: the least squared prediction error wins.
-        let mut pred16 = [0u8; 256];
-        let mut best_mode = DC_PRED;
-        let mut best_sse = u64::MAX;
-        let mut best_pred = [0u8; 256];
-        for mode in [DC_PRED, V_PRED, H_PRED, TM_PRED] {
-            predict_block(&self.rec_y, x0, y0, 16, mode, &mut pred16);
-            let e = Self::sse(&pred16, &src);
-            if e < best_sse {
-                best_sse = e;
-                best_mode = mode;
-                best_pred = pred16;
-            }
-        }
-        // Rate-aware comparison with B_PRED: each sub-block mode costs about three bits, and
-        // the whole-block path codes the DCs once in Y2. lambda scales distortion per bit with
-        // the quantizer (squared error units).
-        let lambda = u64::from((self.q.y_ac * self.q.y_ac) as u32) / 8;
-        let whole_cost = best_sse + 3 * lambda;
-
-        // B_PRED: sub-blocks in raster order, each predicted from the reconstruction so far.
-        let saved_y = self.rec_y.data.clone();
-        let mut b_modes = [B_DC_PRED; 16];
-        let mut b_blocks: Vec<Block> = Vec::with_capacity(16);
-        let mut b_sse = 0u64;
-        {
-            for b in 0..16 {
-                let (bx, by) = (x0 + (b & 3) * 4, y0 + (b >> 2) * 4);
-                let edges = SubEdges::gather(&self.rec_y, x0, y0, b, self.mb_cols);
-                let mut sub_src = [0i32; 16];
-                for r in 0..4 {
-                    for c in 0..4 {
-                        sub_src[r * 4 + c] = src[((b >> 2) * 4 + r) * 16 + (b & 3) * 4 + c];
-                    }
-                }
-                let mut best = (u64::MAX, B_DC_PRED, [0u8; 16]);
-                let mut pred = [0u8; 16];
-                for mode in 0..10u8 {
-                    predict_sub(&edges, mode, &mut pred);
-                    let e = Self::sse(&pred, &sub_src);
-                    if e < best.0 {
-                        best = (e, mode, pred);
-                    }
-                }
-                b_modes[b] = best.1;
-                b_sse += best.0;
-                let residual: [i32; 16] = std::array::from_fn(|i| sub_src[i] - i32::from(best.2[i]));
-                let (quantized, dequantized) = Self::code_block(&residual, self.q.y_dc, self.q.y_ac, true);
-                let recon = idct(&dequantized);
-                for r in 0..4 {
-                    for c in 0..4 {
-                        self.rec_y.set(bx + c, by + r, (i32::from(best.2[r * 4 + c]) + recon[r * 4 + c]).clamp(0, 255) as u8);
-                    }
-                }
-                b_blocks.push(Block::from_raster(&quantized, 0));
-            }
-        }
-        let b_cost = b_sse + 50 * lambda;
-
-        let (y_mode, y2, y_blocks) = if b_cost < whole_cost {
-            (B_PRED, None, b_blocks)
-        } else {
-            // Whole-block mode: undo the B_PRED reconstruction, code 16 blocks + Y2.
-            self.rec_y.data = saved_y;
-            let mut dcs = [0i32; 16];
-            let mut ac_blocks: Vec<[i32; 16]> = Vec::with_capacity(16);
-            let mut deq_blocks: Vec<[i32; 16]> = Vec::with_capacity(16);
-            for b in 0..16 {
-                let mut residual = [0i32; 16];
-                for r in 0..4 {
-                    for c in 0..4 {
-                        let i = ((b >> 2) * 4 + r) * 16 + (b & 3) * 4 + c;
-                        residual[r * 4 + c] = src[i] - i32::from(best_pred[i]);
-                    }
-                }
-                let coeffs = fdct(&residual);
-                dcs[b] = coeffs[0];
-                let mut quantized = [0i32; 16];
-                let mut dequantized = [0i32; 16];
-                for i in 1..16 {
-                    quantized[i] = quantize(coeffs[i], self.q.y_ac, false);
-                    dequantized[i] = quantized[i] * self.q.y_ac;
-                }
-                ac_blocks.push(quantized);
-                deq_blocks.push(dequantized);
-            }
-            // The DCs through the WHT, quantized as Y2, and back through the inverse WHT so the
-            // reconstruction uses exactly the decoder's DC values.
-            let y2_coeffs = fwht(&dcs);
-            let mut y2_q = [0i32; 16];
-            let mut y2_deq = [0i32; 16];
-            for i in 0..16 {
-                let factor = if i == 0 { self.q.y2_dc } else { self.q.y2_ac };
-                y2_q[i] = quantize(y2_coeffs[i], factor, i == 0);
-                y2_deq[i] = y2_q[i] * factor;
-            }
-            let dc_rec = iwht(&y2_deq);
-            for b in 0..16 {
-                deq_blocks[b][0] = dc_rec[b];
-                let recon = idct(&deq_blocks[b]);
-                let (bx, by) = (x0 + (b & 3) * 4, y0 + (b >> 2) * 4);
-                for r in 0..4 {
-                    for c in 0..4 {
-                        let i = ((b >> 2) * 4 + r) * 16 + (b & 3) * 4 + c;
-                        self.rec_y.set(bx + c, by + r, (i32::from(best_pred[i]) + recon[r * 4 + c]).clamp(0, 255) as u8);
-                    }
-                }
-            }
-            let blocks = ac_blocks.iter().map(|q| Block::from_raster(q, 1)).collect();
-            (best_mode, Some(Block::from_raster(&y2_q, 0)), blocks)
-        };
-
-        // Chroma: one mode for both planes.
+    /// Chroma of one macroblock: one mode for both planes; returns it with the U and V blocks.
+    fn encode_chroma(&mut self, mbx: usize, mby: usize) -> (u8, Vec<Block>, Vec<Block>) {
         let (cx0, cy0) = (mbx * 8, mby * 8);
         let mut src_u = [0i32; 64];
         let mut src_v = [0i32; 64];
@@ -531,6 +413,138 @@ impl<'a> Encoder<'a> {
                 blocks.push(Block::from_raster(&quantized, 0));
             }
         }
+        (uv_mode, u_blocks, v_blocks)
+    }
+
+    // Sub-block indices address several arrays by geometry; ranges read better than iterators here.
+    #[allow(clippy::needless_range_loop)]
+    fn encode_macroblock(&mut self, mbx: usize, mby: usize) {
+        let (x0, y0) = (mbx * 16, mby * 16);
+        // Source luma of this macroblock.
+        let mut src = [0i32; 256];
+        for r in 0..16 {
+            for c in 0..16 {
+                src[r * 16 + c] = self.src_y(x0 + c, y0 + r);
+            }
+        }
+        // Whole-block luma modes: the least squared prediction error wins.
+        let mut pred16 = [0u8; 256];
+        let mut best_mode = DC_PRED;
+        let mut best_sse = u64::MAX;
+        let mut best_pred = [0u8; 256];
+        for mode in [DC_PRED, V_PRED, H_PRED, TM_PRED] {
+            predict_block(&self.rec_y, x0, y0, 16, mode, &mut pred16);
+            let e = Self::sse(&pred16, &src);
+            if e < best_sse {
+                best_sse = e;
+                best_mode = mode;
+                best_pred = pred16;
+            }
+        }
+        // Rate-aware comparison with B_PRED: each sub-block mode costs about three bits, and
+        // the whole-block path codes the DCs once in Y2. lambda scales distortion per bit with
+        // the quantizer (squared error units).
+        let lambda = u64::from((self.q.y_ac * self.q.y_ac) as u32) / 8;
+        let whole_cost = best_sse + 3 * lambda;
+
+        // B_PRED: sub-blocks in raster order, each predicted from the reconstruction so far.
+        // B_PRED writes only this macroblock's 16 rows: save those, not the whole plane.
+        let rows = |p: &Plane| -> [[u8; 16]; 16] { std::array::from_fn(|r| p.data[(y0 + r) * p.width + x0..][..16].try_into().unwrap_or([0; 16])) };
+        let saved_y = rows(&self.rec_y);
+        let mut b_modes = [B_DC_PRED; 16];
+        let mut b_blocks: Vec<Block> = Vec::with_capacity(16);
+        let mut b_sse = 0u64;
+        {
+            for b in 0..16 {
+                let (bx, by) = (x0 + (b & 3) * 4, y0 + (b >> 2) * 4);
+                let edges = SubEdges::gather(&self.rec_y, x0, y0, b, self.mb_cols);
+                let mut sub_src = [0i32; 16];
+                for r in 0..4 {
+                    for c in 0..4 {
+                        sub_src[r * 4 + c] = src[((b >> 2) * 4 + r) * 16 + (b & 3) * 4 + c];
+                    }
+                }
+                let mut best = (u64::MAX, B_DC_PRED, [0u8; 16]);
+                let mut pred = [0u8; 16];
+                for mode in 0..10u8 {
+                    predict_sub(&edges, mode, &mut pred);
+                    let e = Self::sse(&pred, &sub_src);
+                    if e < best.0 {
+                        best = (e, mode, pred);
+                    }
+                }
+                b_modes[b] = best.1;
+                b_sse += best.0;
+                let residual: [i32; 16] = std::array::from_fn(|i| sub_src[i] - i32::from(best.2[i]));
+                let (quantized, dequantized) = Self::code_block(&residual, self.q.y_dc, self.q.y_ac, true);
+                let recon = idct(&dequantized);
+                for r in 0..4 {
+                    for c in 0..4 {
+                        self.rec_y.set(bx + c, by + r, (i32::from(best.2[r * 4 + c]) + recon[r * 4 + c]).clamp(0, 255) as u8);
+                    }
+                }
+                b_blocks.push(Block::from_raster(&quantized, 0));
+            }
+        }
+        let b_cost = b_sse + 50 * lambda;
+
+        let (y_mode, y2, y_blocks) = if b_cost < whole_cost {
+            (B_PRED, None, b_blocks)
+        } else {
+            // Whole-block mode: undo the B_PRED reconstruction, code 16 blocks + Y2.
+            let w = self.rec_y.width;
+            for (r, row) in saved_y.iter().enumerate() {
+                self.rec_y.data[(y0 + r) * w + x0..][..16].copy_from_slice(row);
+            }
+            let mut dcs = [0i32; 16];
+            let mut ac_blocks: Vec<[i32; 16]> = Vec::with_capacity(16);
+            let mut deq_blocks: Vec<[i32; 16]> = Vec::with_capacity(16);
+            for b in 0..16 {
+                let mut residual = [0i32; 16];
+                for r in 0..4 {
+                    for c in 0..4 {
+                        let i = ((b >> 2) * 4 + r) * 16 + (b & 3) * 4 + c;
+                        residual[r * 4 + c] = src[i] - i32::from(best_pred[i]);
+                    }
+                }
+                let coeffs = fdct(&residual);
+                dcs[b] = coeffs[0];
+                let mut quantized = [0i32; 16];
+                let mut dequantized = [0i32; 16];
+                for i in 1..16 {
+                    quantized[i] = quantize(coeffs[i], self.q.y_ac, false);
+                    dequantized[i] = quantized[i] * self.q.y_ac;
+                }
+                ac_blocks.push(quantized);
+                deq_blocks.push(dequantized);
+            }
+            // The DCs through the WHT, quantized as Y2, and back through the inverse WHT so the
+            // reconstruction uses exactly the decoder's DC values.
+            let y2_coeffs = fwht(&dcs);
+            let mut y2_q = [0i32; 16];
+            let mut y2_deq = [0i32; 16];
+            for i in 0..16 {
+                let factor = if i == 0 { self.q.y2_dc } else { self.q.y2_ac };
+                y2_q[i] = quantize(y2_coeffs[i], factor, i == 0);
+                y2_deq[i] = y2_q[i] * factor;
+            }
+            let dc_rec = iwht(&y2_deq);
+            for b in 0..16 {
+                deq_blocks[b][0] = dc_rec[b];
+                let recon = idct(&deq_blocks[b]);
+                let (bx, by) = (x0 + (b & 3) * 4, y0 + (b >> 2) * 4);
+                for r in 0..4 {
+                    for c in 0..4 {
+                        let i = ((b >> 2) * 4 + r) * 16 + (b & 3) * 4 + c;
+                        self.rec_y.set(bx + c, by + r, (i32::from(best_pred[i]) + recon[r * 4 + c]).clamp(0, 255) as u8);
+                    }
+                }
+            }
+            let blocks = ac_blocks.iter().map(|q| Block::from_raster(q, 1)).collect();
+            (best_mode, Some(Block::from_raster(&y2_q, 0)), blocks)
+        };
+
+        let (uv_mode, u_blocks, v_blocks) = self.encode_chroma(mbx, mby);
 
         let skip = y2.as_ref().is_none_or(|b| !b.has_coeffs())
             && y_blocks.iter().all(|b| !b.has_coeffs())
