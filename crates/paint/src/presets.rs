@@ -4,7 +4,10 @@
 //! Special Effects. Every preset is plain [`BrushSettings`] data, so it serialises, journals and
 //! can be edited like any user preset.
 
-use crate::brush::*;
+use crate::brush::{
+    BrushPreset, BrushSettings, ColorDynamics, Control, DualBrush, Dynamic, MaskMode, Pattern, PatternStyle, Scattering, ShapeDynamics, Smoothing, Texture,
+    TipShape, Transfer,
+};
 use crate::procedural::{bristle_tip, chalk_tip, charcoal_tip, grass_tip, leaf_tip, rake_tip, spatter_tip, sponge_tip, star_tip};
 
 /// Preset groups, in panel order.
@@ -435,14 +438,33 @@ impl Texture {
     }
 }
 
-/// The built-in preset set, in display order (grouped by [`GROUPS`]).
-pub fn builtin() -> Vec<BrushPreset> {
+#[cfg(test)]
+static BUILTIN_INITIALIZATIONS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn build_builtin() -> Vec<BrushPreset> {
     let base = BrushSettings { pressure_size: false, spacing: 0.25, ..Default::default() };
     let mut v = general(&base);
     v.extend(dry_media(&base));
     v.extend(wet_media(&base));
     v.extend(special_effects(&base));
     v
+}
+
+/// An owned copy of the built-in preset set, in display order (grouped by [`GROUPS`]).
+pub fn builtin() -> Vec<BrushPreset> {
+    builtin_shared().as_ref().clone()
+}
+
+/// The built-in set shared by new sessions until one is edited.
+pub fn builtin_shared() -> std::sync::Arc<Vec<BrushPreset>> {
+    static BUILTIN: std::sync::OnceLock<std::sync::Arc<Vec<BrushPreset>>> = std::sync::OnceLock::new();
+    BUILTIN
+        .get_or_init(|| {
+            #[cfg(test)]
+            BUILTIN_INITIALIZATIONS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            std::sync::Arc::new(build_builtin())
+        })
+        .clone()
 }
 
 /// Find a preset by name (case-insensitive).
@@ -453,6 +475,16 @@ pub fn find<'a>(presets: &'a [BrushPreset], name: &str) -> Option<&'a BrushPrese
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn builtins_initialize_once_across_owned_and_shared_calls() {
+        let first = builtin_shared();
+        let owned = builtin();
+        let second = builtin_shared();
+        assert!(std::sync::Arc::ptr_eq(&first, &second));
+        assert_eq!(*first, owned);
+        assert_eq!(BUILTIN_INITIALIZATIONS.load(std::sync::atomic::Ordering::Relaxed), 1);
+    }
 
     #[test]
     fn builtins_are_grouped_and_unique() {
