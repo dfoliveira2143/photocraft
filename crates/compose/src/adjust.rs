@@ -20,7 +20,7 @@ pub use channels::{
     LAB_NEUTRAL, LabOp, apply_cmy, cmy_adjustment, cmyk_channel_adjustment, ink_brightness_contrast_lut, ink_luma, ink_through, lab_channel_adjustment,
     lab_stored_op, stored_channel_adjustment, stored_channels, threshold_white,
 };
-use channels::{apply_lab, legacy_brightness_contrast, legacy_brightness_contrast_hdr};
+use channels::{apply_lab, gray_from_srgb_lightness, legacy_brightness_contrast, legacy_brightness_contrast_hdr};
 use color::gradient;
 pub use color::{
     BalanceCurve, VIBRANCE_BOOST, VIBRANCE_GREY, bayer4, black_white_gray, color_balance_channel, colorize_saturation, hdr_saturation_factor, hsl_to_rgb,
@@ -31,8 +31,8 @@ pub use color::{
 use tone::LUT_SIZE;
 pub(crate) use tone::apply_tone;
 pub use tone::{
-    TONE_SLOPE_SPAN, contour_curve_lut, curve_lut, curve_lut_mode, curve_map_lut, float_tone_extrapolates, float_tone_identity, levels, levels_float,
-    levels_gamma, levels_q, modern_brightness, modern_contrast, modern_lut, posterize, posterize_in, tone_luts, tone_luts_depth, tone_luts_q,
+    TONE_SLOPE_SPAN, contour_curve_lut, curve_lut, curve_lut_mode, curve_map_lut, curve_samples, float_tone_extrapolates, float_tone_identity, levels,
+    levels_float, levels_gamma, levels_q, modern_brightness, modern_contrast, modern_lut, posterize, posterize_in, tone_luts, tone_luts_depth, tone_luts_q,
 };
 use tone::{lut, map_rgb};
 
@@ -246,8 +246,9 @@ fn apply_depth_mode(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, dept
                 }
             })
         }
-        Adjustment::GradientMap { stops, reverse, dither } => {
+        Adjustment::GradientMap { stops, reverse, dither, .. } => {
             let (w, x0, y0) = (buf.rect.width().max(1) as usize, buf.rect.x0, buf.rect.y0);
+            let gray_lightness = mode == ColorMode::Grayscale && depth != Some(SampleType::F32);
             for (i, p) in buf.px.iter_mut().enumerate() {
                 if p[3] <= 0.0 {
                     continue;
@@ -260,6 +261,9 @@ fn apply_depth_mode(adj: &Adjustment, buf: &mut Buffer, transfer: Transfer, dept
                     t = 1.0 - t;
                 }
                 let mut o = gradient(stops, t);
+                if gray_lightness {
+                    o = gray_from_srgb_lightness(o);
+                }
                 if *dither {
                     let d = bayer4(x0 + (i % w) as i32, y0 + (i / w) as i32) / 255.0;
                     o = o.map(|v| (v + d).clamp(0.0, 1.0));
@@ -396,6 +400,8 @@ mod lookup_tests {
     }
 }
 
+#[cfg(test)]
+mod gradient_map_grayscale_tests;
 #[cfg(test)]
 mod tone_tests;
 
