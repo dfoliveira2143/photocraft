@@ -1,11 +1,11 @@
 use super::planes::color_count;
-use super::*;
+use super::{AlphaChannel, Color, ColorIndicates, ColorMode, DocState, Document, Serialize};
 
 // ---------------------------------------------------------------------------------------------
 // View state
 
 /// What pixel commands edit (Channels panel click / ⌘2…⌘9).
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, craft_ui_macros::PlainData)]
 #[serde(rename_all = "camelCase", tag = "kind", content = "index")]
 pub enum ChannelTarget {
     /// The layers (all colour channels). In Quick Mask mode this edits the Quick Mask.
@@ -22,10 +22,12 @@ pub enum ChannelTarget {
 }
 
 /// Per-document Channels panel state: the target and the eye toggles. Not part of history.
-#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[derive(Clone, Debug, Default, PartialEq, Serialize, craft_ui_macros::PlainData)]
 #[serde(rename_all = "camelCase")]
 pub struct ChannelView {
     pub target: ChannelTarget,
+    /// Selected native colour components; empty retains the legacy single target.
+    pub selected_colors: Vec<usize>,
     /// Hidden colour channels (missing entries are visible).
     pub color_hidden: Vec<bool>,
     /// Visible alpha channels (missing entries are hidden).
@@ -36,6 +38,9 @@ pub struct ChannelView {
 }
 
 impl ChannelView {
+    pub fn color_selection(&self, count: usize) -> Option<crate::color_channels::ColorChannels> {
+        crate::color_channels::from_view(self, count)
+    }
     pub fn color_visible(&self, k: usize) -> bool {
         !self.color_hidden.get(k).copied().unwrap_or(false)
     }
@@ -93,20 +98,30 @@ pub(crate) fn fix_view(st: &mut DocState) {
     let n = st.doc.channels.len();
     let colors = color_count(&st.doc);
     let quick = st.doc.quick_mask.is_some();
+    let active = st.active_layer.and_then(|id| st.doc.layer(id));
+    let missing_layer_mask = active.is_none_or(|l| l.mask.is_none());
+    let missing_vector_mask = active.is_none_or(|l| l.vector_mask.is_none());
     {
         let v = &mut st.channel_view;
         v.alpha_visible.truncate(n);
         v.color_hidden.truncate(colors);
+        v.selected_colors.retain(|k| *k < colors);
         match v.target {
             ChannelTarget::Alpha(i) if i >= n => v.target = ChannelTarget::Composite,
             ChannelTarget::Color(k) if k >= colors || colors < 2 => v.target = ChannelTarget::Composite,
-            ChannelTarget::LayerMask if st.active_layer.and_then(|id| st.doc.layer(id)).is_none_or(|l| l.mask.is_none()) => {
+            ChannelTarget::LayerMask if missing_layer_mask => {
                 v.target = ChannelTarget::Composite;
             }
-            ChannelTarget::VectorMask if st.active_layer.and_then(|id| st.doc.layer(id)).is_none_or(|l| l.vector_mask.is_none()) => {
+            ChannelTarget::VectorMask if missing_vector_mask => {
                 v.target = ChannelTarget::Composite;
             }
             _ => {}
+        }
+        if v.color_selection(colors).is_some_and(|selected| selected.len() == colors) {
+            v.target = ChannelTarget::Composite;
+        }
+        if !matches!(v.target, ChannelTarget::Color(_)) {
+            v.selected_colors.clear();
         }
     }
     crate::mask_view_cmds::fix(st);
@@ -123,15 +138,12 @@ pub(crate) fn fix_view(st: &mut DocState) {
     }
 }
 
-/// Bump the revision for a view-only change without dirtying a clean document.
+/// Bump the revision for a view-only change without dirtying a clean document. The channels
+/// shown change the picture, so the whole canvas is drawn again.
 pub(super) fn touch(st: &mut DocState) {
-    let clean = st.saved_revision == st.revision;
-    st.revision += 1;
-    st.view_revision += 1;
-    if clean {
-        st.saved_revision = st.revision;
-    }
+    st.bump_view_revision(!st.is_dirty());
     st.last_damage = None;
+    st.record_damage();
 }
 
 // ---------------------------------------------------------------------------------------------

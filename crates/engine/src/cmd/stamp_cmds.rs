@@ -53,8 +53,8 @@ fn stamp_layer(doc: &Document, name: String) -> Result<Layer> {
 /// Make `id` the only selected layer and the active one.
 fn select_only(s: &mut Session, id: LayerId) {
     if let Some(st) = s.active_mut() {
-        st.selected_layers = vec![id];
-        st.active_layer = Some(id);
+        *st.selection_mut() = vec![id];
+        st.set_active_layer(Some(id));
         st.layer_anchor = Some(id);
         crate::fix_selection(st);
     }
@@ -82,11 +82,16 @@ fn stamp_visible(s: &mut Session, p: &Value) -> Result<Value> {
     Ok(json!({ "layer": id.0 }))
 }
 
-/// A plain, unlocked pixel layer with no pixels, mask or clipping: safe to stamp into.
-fn is_empty_pixel_layer(doc: &Document, id: LayerId) -> bool {
+/// A plain, unlocked pixel layer with no pixels, mask, clipping or video: safe to stamp into.
+/// Pixels it has only through a visible default pixel (no tiles stored) count as pixels.
+pub(crate) fn is_empty_pixel_layer(doc: &Document, id: LayerId) -> bool {
     let Some(l) = doc.layer(id) else { return false };
     let locks = doc.effective_locks(id);
-    matches!(&l.content, LayerContent::Raster(s) if s.content_bounds().is_empty())
+    // Only the default pixel's alpha counts: a mode or profile conversion keeps it transparent but
+    // gives its colour channels other values (no ink in CMYK, a neutral a/b in Lab).
+    matches!(&l.content, LayerContent::Raster(s)
+        if s.content_bounds().is_empty() && s.format().alpha && s.default_pixel().last().is_some_and(|a| *a <= 0.0))
+        && l.video.is_none()
         && l.visible
         && l.mask.is_none()
         && l.vector_mask.is_none()
@@ -125,7 +130,7 @@ fn stamp_down(s: &mut Session, p: &Value) -> Result<Value> {
         let mut tmp = doc.clone();
         let mut base = lower.clone();
         base.visible = true;
-        tmp.layers = vec![base, upper];
+        tmp.layers = vec![base, upper].into();
         let fmt = doc.pixel_format();
         let fmt = if lower.locks.transparency { fmt } else { PixelFormat::new(fmt.mode, fmt.sample, true) };
         let surf = photocraft_compose::flatten_to_surface(&tmp, fmt, None);
@@ -277,6 +282,45 @@ mod tests {
         assert_eq!(ids(&s).len(), 5);
     }
 
+    /// A layer opaque only through its default pixel (no tiles, as KRA imports it) and a blank
+    /// video layer are not empty: the stamp goes into a new layer above them.
+    #[test]
+    fn stamp_visible_keeps_default_pixel_and_video_layers() {
+        let (mut s, ..) = session(8);
+        s.execute("layer.new.layer", json!({"name": "Opaque"})).unwrap();
+        let opaque = s.active().unwrap().active_layer.unwrap();
+        let l = std::sync::Arc::make_mut(s.active_mut().unwrap().doc_mut()).layer_mut(opaque).unwrap();
+        let fmt = l.surface().unwrap().format();
+        l.content = LayerContent::Raster(photocraft_raster::Surface::with_default(fmt, &[0.0, 1.0, 0.0, 1.0]));
+        let video = LayerId(s.execute("layer.videoLayers.newBlankVideoLayer", json!({})).unwrap()["layer"].as_u64().unwrap());
+        for old in [opaque, video] {
+            s.execute("layer.select", json!({"layer": old.0})).unwrap();
+            let before = s.active().unwrap().doc.layer(old).unwrap().clone();
+            let n = ids(&s).len();
+            let r = s.execute("layer.stampVisible", json!({})).unwrap();
+            assert_ne!(r["layer"].as_u64(), Some(old.0), "a new layer above {old:?}");
+            assert_eq!(ids(&s).len(), n + 1);
+            assert_eq!(*s.active().unwrap().doc.layer(old).unwrap(), before, "{old:?} keeps its pixels and video");
+        }
+    }
+
+    /// An empty layer stays empty through a mode change, though its default pixel's colour
+    /// bytes change: the stamp still goes into it.
+    #[test]
+    fn stamp_visible_fills_an_empty_layer_after_a_mode_change() {
+        for mode in ["image.mode.cmyk", "image.mode.lab"] {
+            let (mut s, ..) = session(8);
+            s.execute("layer.new.layer", json!({"name": "Empty"})).unwrap();
+            let empty = s.active().unwrap().active_layer.unwrap();
+            s.execute(mode, json!({})).unwrap();
+            s.execute("layer.select", json!({"layer": empty.0})).unwrap();
+            let n = ids(&s).len();
+            let r = s.execute("layer.stampVisible", json!({})).unwrap();
+            assert_eq!(r["layer"].as_u64(), Some(empty.0), "{mode}");
+            assert_eq!(ids(&s).len(), n, "{mode}");
+        }
+    }
+
     #[test]
     fn stamp_visible_respects_opacity_blend_and_groups() {
         let (mut s, bg, _, blue) = session(8);
@@ -330,7 +374,7 @@ mod tests {
     #[test]
     fn stamp_down_keeps_the_lower_layers_clipping_label_and_link() {
         let (mut s, _, hidden, blue) = session(8);
-        let l = std::sync::Arc::make_mut(&mut s.active_mut().unwrap().doc).layer_mut(hidden).unwrap();
+        let l = std::sync::Arc::make_mut(s.active_mut().unwrap().doc_mut()).layer_mut(hidden).unwrap();
         l.visible = true;
         l.clipped = true;
         l.label = photocraft_doc::LabelColor::Red;
