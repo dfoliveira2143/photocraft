@@ -5,9 +5,7 @@ signed installers for macOS, Windows, Linux and the web, plus a FreeBSD tarball,
 or updates a **draft** GitHub Release named `PhotoCraft v<version>`. Nobody sees a draft until a
 maintainer publishes it.
 
-This is PhotoCraft's implementation of the shared
-[release playbook](release-playbook.md). User-facing names say **PhotoCraft**. Files, binaries
-and ids stay lowercase (`photocraft-<version>-<platform>-<arch>.<ext>`, `ai.storyteller.photocraft`).
+User-facing names say **PhotoCraft**. Files, binaries and ids stay lowercase (`photocraft-<version>-<platform>-<arch>.<ext>`, `ai.storyteller.photocraft`).
 
 ## In-app update checks
 
@@ -20,11 +18,10 @@ in the manual check window. Concurrent requests share one check.
 HTTPS validates certificates and host names against the operating system's trust store.
 
 Tags must be semantic versions (`v0.8.0` or `0.8.0`); only published stable versions newer
-than the installed workspace version trigger a notice. The notice opens the official release
-page to choose an installer; installation remains a user action. Drafts and prereleases do
-not trigger it. Web/headless frontends and the Flatpak (no network in its sandbox; `flatpak update`
-owns updates there) have no update transport. No release-workflow changes
-are required: publishing a newer stable GitHub Release makes it discoverable.
+than the installed workspace version trigger a notice. Drafts and prereleases do not trigger it.
+Flatpak builds also check for releases; repository-managed installations are updated through
+their package manager. Web/headless frontends have no update transport. No release-workflow
+changes are required: publishing a newer stable GitHub Release makes it discoverable.
 
 ## Cutting a release
 
@@ -37,7 +34,24 @@ are required: publishing a newer stable GitHub Release makes it discoverable.
    ```
 
    Commit the change (`Cargo.toml` + `Cargo.lock`) through the normal review flow.
-2. **Merge `main` into `release`** (or fast-forward it) and push. The workflow starts by itself.
+2. **Review the release trust boundary, then merge `main` into `release`** (or fast-forward it)
+   and push. The stable workflow starts by itself. Compare the proposed tree with the
+   **previous trusted release**, not a manifest from main. Review and preserve:
+   - every transitive reusable workflow/action pin. The nightly signer no longer rides this sync:
+     it runs on the dedicated `nightly-signer` branch (see below), but the `release` environment
+     trusts both branches, so this review still covers everything that can reach it;
+   - `packaging/windows/sign.ps1`, its signing configuration, tool installers and imports;
+   - the macOS nightly signing scripts (`packaging/macos/nightly-sign.sh`, `nightly-verify.sh`,
+     `nightly-lib.sh`, `import-cert.sh`) and entitlements, and the Linux public key
+     `.github/nightly-linux-signing-key.asc`;
+   - **every other workflow that can reach the `release` environment**, including reusable
+     callees, dynamic environment selection and changed executable dependencies. A new
+     workflow outside the named nightly paths is not exempt.
+
+   Stop the sync if that closure is unreviewed. Actual top-level repository/event/branch checks
+   and the existing environment restrictions provide authority, not permanent branch divergence.
+   Main CI changes do not need a separate blanket review gate. This procedure does not repair
+   the stable workflow's existing mutable dependencies, builds or caches.
 3. **Wait for the draft.** After about 30 to 45 minutes (notarization is the slow part), the
    Releases page has a draft `PhotoCraft v0.2.0`, tagged `v0.2.0` on the pushed commit, with
    every artifact and `SHA256SUMS.txt`. The notes are generated from the merged PRs.
@@ -61,13 +75,50 @@ it with `cargo xtask version set` before building, so the binaries report it too
 needs the `release` environment, which only the `release` branch can use, so pick that branch
 in the dialog.
 
+## Release-ref nightly preparation
+
+The Windows, Linux and macOS source preparation is documented in
+[`nightly-release-preparation.md`](nightly-release-preparation.md). It is not an activated
+signing or publication pipeline. Stable `release.yml`, its schedule, tags, concurrency,
+environment values and environment rules are unchanged.
+
+Stable releases still come only from `refs/heads/release`. The nightly signer runs on
+`refs/heads/nightly-signer` instead, so signer and policy
+updates never need a stable release sync or a release-branch push. That branch is created once at
+a reviewed main commit and later only fast-forwards to main commits, by a release manager running
+the settings script in craft-common-actions (from a checkout of that repo, with PyYAML installed):
+
+```sh
+gh repo clone storytold/craft-common-actions && cd craft-common-actions
+python3 -m pip install --user pyyaml
+python3 scripts/nightly_signer_settings.py advance --repos photocraft --sha <main commit>          # preview
+python3 scripts/nightly_signer_settings.py advance --repos photocraft --sha <main commit> --apply
+```
+
+It refuses while a `nightly-sign` run is queued or
+running, scans the tree so only the pinned `nightly-sign.yml` caller can reach an environment, and
+prints the full diff of `.github/` and `packaging/` for review before `--apply`. That diff is the
+trust closure, including `packaging/env.sh`, which `import-cert.sh` sources with the Apple keys.
+Org rulesets let only release managers create or update the branch and forbid force-pushes and
+deletion. Pausing never requires a push: cancel or disable the nightly workflows. Verify the
+actual environment permits only the `release` and `nightly-signer` **branches**, excludes main
+and same-name tags, and introduces no per-run approval requirement before activation; unresolved
+protection or secret-scope collisions are blockers, not permission to change settings.
+
+Nightlies share the existing Windows signing identity with stable. A suspected key or signing
+service compromise therefore affects **both channels**: stop/cancel nightlies immediately,
+notify the release maintainers/security owner privately, and have the identity's authorized
+owner revoke/rotate it and assess already-signed stable and nightly packages. Stopping one
+workflow does not revoke signatures or make stable safe. No credentials or identity values
+are recorded in this procedure.
+
 ## What gets built
 
 | Platform | Artifacts | Built on |
 |---|---|---|
 | macOS 11+ (universal: Apple silicon + Intel) | `photocraft-<v>-macos-universal.dmg`, `photocraft-cli-<v>-macos-universal.zip` | `macos-15` |
-| Windows 10+ x64 | `photocraft-<v>-windows-x64.msi`, `photocraft-<v>-windows-x64-portable.zip` | `windows-latest` |
-| Windows 10+ x86 (32-bit) | `photocraft-<v>-windows-x86.msi`, `photocraft-<v>-windows-x86-portable.zip` | `windows-latest` |
+| Windows 10+ x64 | `photocraft-<v>-windows-x64.msi`, `photocraft-<v>-windows-x64-portable.zip`, `photocraft-<v>-windows-x64-symbols.zip` | `windows-latest` |
+| Windows 10+ x86 (32-bit) | `photocraft-<v>-windows-x86.msi`, `photocraft-<v>-windows-x86-portable.zip`, `photocraft-<v>-windows-x86-symbols.zip` | `windows-latest` |
 | Linux x86_64 | `photocraft-<v>-linux-x86_64.{AppImage,AppImage.zsync,deb,rpm,tar.gz,flatpak}` | `ubuntu-22.04` (Flatpak: `ubuntu-24.04`) |
 | Linux aarch64 | `photocraft-<v>-linux-aarch64.{AppImage,AppImage.zsync,deb,rpm,tar.gz,flatpak}` | `ubuntu-22.04-arm` (Flatpak: `ubuntu-24.04-arm`) |
 | Linux riscv64 (glibc 2.39+) | `photocraft-<v>-linux-riscv64.tar.gz` | cross-compiled on `ubuntu-24.04` (ports.ubuntu.com riscv64 libs); CLI smoke-tested under QEMU |
@@ -76,7 +127,7 @@ in the dialog.
 
 Every binary reports its version, the commit and the build date: `photocraft --version`,
 `photocraft-cli --version`, and *Help › About PhotoCraft*. CI sets `PHOTOCRAFT_BUILD_SHA` and
-`PHOTOCRAFT_BUILD_DATE`, and `crates/engine/src/build_info.rs` reads them at compile time. A plain
+`PHOTOCRAFT_BUILD_DATE`, and `crates/engine-core/src/build_info.rs` reads them at compile time. A plain
 `cargo build` doesn't set them and reports `0.2.0 (dev build)`.
 
 Every desktop build job (macOS, Windows, Linux, FreeBSD) also checks out [craft-fonts](https://github.com/storytold/craft-fonts)
@@ -85,7 +136,7 @@ at the `craft-fonts-ref` commit in `.github/workflows/release.yml` and builds wi
 `docs/development.md` › Fonts) and fail rather than ship without them. The packages carry each font's licence as
 `OFL-<family>.txt` (`copy_font_licences` in `packaging/env.sh`; the portable zip on Windows;
 `Contents/Resources/Licenses` in the macOS app). Bump the pin deliberately, together with the one
-in `ci.yml`. Rules: `../craftrules/standards/fonts.md`; build option: `docs/development.md` › Fonts.
+in `ci.yml`. Build option: `docs/development.md` › Fonts.
 
 ### macOS
 
@@ -106,7 +157,11 @@ in `ci.yml`. Rules: `../craftrules/standards/fonts.md`; build option: `docs/deve
   Its Finder window (background, icon size and positions) comes from
   [`packaging/macos/dmg/`](../packaging/macos/dmg/README.md), and its volume is named `PhotoCraft`
   without the version, which the window's background needs; the DMG file name keeps the version.
-- **CLI:** the universal `photocraft-cli` is signed with the same Developer ID, the hardened
+- **CLI:** `PhotoCraft.app/Contents/MacOS/photocraft-cli` is bundled and signed so generated
+  droplet scripts can run without installing the separate CLI download. The scripts prefer
+  `PHOTOCRAFT_CLI` when set, then the bundled CLI in `/Applications` or `~/Applications`, then
+  `photocraft-cli` on `PATH`. Finder drag-and-drop onto droplets still requires an app wrapper.
+  The universal standalone `photocraft-cli` is signed with the same Developer ID, the hardened
   runtime and a secure timestamp (identifier `ai.storyteller.photocraft-cli`), zipped, and the zip
   is sent to `notarytool`. Only `.app`, `.dmg` and `.pkg` can hold a stapled ticket, not a bare
   Mach-O, so Gatekeeper looks the CLI's ticket up online the first time a downloaded
@@ -188,6 +243,11 @@ goes in `CARGO_TARGET_<TRIPLE>_RUSTFLAGS`, so host build scripts aren't affected
   of `%APPDATA%\Photocraft`. If that folder isn't writable the app warns and uses `%APPDATA%`.
   The MSI has no marker. The logic is in `apps/photocraft/src/app_dirs.rs` and works the same
   on macOS and Linux.
+- **Symbols zip:** `photocraft.pdb` and `photocraft_cli.pdb` from the same release build, plus
+  `packaging/windows/symbols.txt` (how to load them in a profiler). An optional download, so the
+  MSI and portable zip stay their size; it lets anyone profile the released exes with function
+  names (#688). Only that build's PDBs match its exes, so they can't be rebuilt later; the
+  release profile has no line tables, so they carry function names, not source lines.
 - **Signing:** `packaging/windows/sign.ps1` signs both `.exe` files and then the `.msi` with
   `signtool`, using SHA-256 and an RFC 3161 timestamp. It uses whichever material is present:
   1. a `.pfx` file (`WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`), timestamped by
@@ -236,10 +296,24 @@ Why these formats:
   `~/.local/share/applications/ai.storyteller.photocraft.desktop` with `Exec` rewritten to
   the AppImage's path (`TryExec` dropped, the binary isn't on the host PATH) and the
   hicolor icons beside it, rewriting only when the content changed, and any failure leaves
-  the launch untouched. `PHOTOCRAFT_NO_DESKTOP_INTEGRATION=1` opts out; to uninstall, `rm
+  the launch untouched. Launcher refresh uses a hidden generated snapshot to preserve
+  user edits, comments and deleted keys while updating untouched packaged metadata and
+  known executable paths. Missing or damaged snapshots use a conservative fallback.
+  External integration removes a duplicate only when a regular launcher exactly matches
+  a valid regular snapshot. Symlinked launchers or snapshots (including dangling links)
+  and special files are left alone during both refresh and deduplication; icons still
+  install. These checks do not synchronize concurrent changes by other processes.
+  This overlaps the deduplication protection proposed in #5168 without depending on it.
+  `PHOTOCRAFT_NO_DESKTOP_INTEGRATION=1` opts out; to uninstall, `rm
   ~/.local/share/applications/ai.storyteller.photocraft.desktop` and `find
   ~/.local/share/icons/hicolor -name 'ai.storyteller.photocraft*' -delete`. The script is
   covered by `packaging/linux/apprun-test.sh` in the packaging-lint workflow.
+  A leading `--cli` launches the bundled `usr/bin/photocraft-cli`, without desktop
+  integration: `./photocraft-<version>-linux-x86_64.AppImage --cli mcp` serves MCP on
+  stdio. A symlink named `photocraft-cli` also selects that binary via the runtime's
+  `ARGV0`. Arguments and process streams pass through unchanged; the entry point
+  uses `exec` so signals and exit status reach the caller directly. CLI routing is
+  covered by `packaging/linux/apprun-cli-test.sh` in the same workflow.
 - **.deb** covers Debian, Ubuntu, Mint, Pop!_OS and elementary. **.rpm** covers Fedora, RHEL
   and its clones, and openSUSE. Both integrate with the menu, MIME and icon caches (the
   `postinst.sh` hook) and uninstall cleanly. Both are built by
@@ -264,11 +338,11 @@ Why these formats:
   ```
 
   Sandbox permissions (justified in the manifest): Wayland with X11 fallback, IPC (X11
-  shared memory), `dri` for the GPU, and read/write access to Pictures and Documents. Every
-  other file goes through the file-chooser and document portals. There's no network, so the
-  `--control` server is only reachable from inside the sandbox until the user runs
-  `flatpak override --user --share=network ai.storyteller.photocraft`. Host fonts are read from
-  `/run/host/fonts` and `/run/host/user-fonts`. Locally (on Linux, with `flatpak` and
+  shared memory), `dri` for the GPU, the CUPS socket, Avahi and `~/.cups` (read-only) for
+  printing, and read/write access to Pictures and Documents. Every
+  other file goes through the file-chooser and document portals. Network access enables update
+  checks and makes the optional loopback `--control` server reachable from the host. Host fonts
+  are read from `/run/host/fonts` and `/run/host/user-fonts`. Locally (on Linux, with `flatpak` and
   `flatpak-builder`): `packaging/linux/package.sh --formats tar && packaging/linux/flatpak-bundle.sh`.
 - **Flathub**: `packaging/linux/flatpak/ai.storyteller.photocraft.yml` builds from source and
   is ready for a Flathub submission (it keeps the same runtime and `finish-args` as the bundle
@@ -289,6 +363,48 @@ one is missing, prints the package to install and exits with status 1 instead of
 
 Locally (on Linux): install [nfpm](https://nfpm.goreleaser.com/install/), then
 `packaging/linux/package.sh` (or `--formats "deb tar"`).
+
+#### Packaged automation and offline documentation
+
+Both Flatpak manifests install `photocraft-cli`, alongside the GUI. To start the stdio MCP
+server with a project in the sandbox's allowed Documents directory:
+
+```sh
+flatpak run --command=photocraft-cli ai.storyteller.photocraft mcp \
+  --automation-read-root "$HOME/Documents/project" \
+  --automation-write-root "$HOME/Documents/project"
+```
+
+The automation roots restrict PhotoCraft's file access; they do not grant Flatpak access to
+other host directories. For a project elsewhere, also grant that directory with Flatpak's
+`--filesystem=/absolute/project` run option. Stdio MCP needs no network permission.
+
+Linux packages include the original `mcp.md` and `control-protocol.md` for offline use:
+
+| Format | Documentation directory |
+|---|---|
+| `.deb`, `.rpm` | `/usr/share/doc/photocraft/` |
+| Extracted `.tar.gz` | `share/doc/photocraft/` inside the extracted release directory |
+| Flatpak (source or bundle) | `/app/share/doc/photocraft/` inside the sandbox |
+| Extracted AppImage | `squashfs-root/usr/share/doc/photocraft/` |
+
+For example, read the Flatpak's MCP guide without opening the GUI:
+
+```sh
+flatpak run --command=cat ai.storyteller.photocraft /app/share/doc/photocraft/mcp.md
+```
+
+To read an AppImage's guides, run `./PhotoCraft.AppImage --appimage-extract` in a directory
+where you want its `squashfs-root` contents, using the downloaded file's actual name. Then
+open either guide in `squashfs-root/usr/share/doc/photocraft/`. Extraction is an explicit user
+action; launching the app does not extract documentation into the home directory. These two
+Markdown files are included as written; links to other repository documents still need a
+checkout or the online documentation.
+
+`bash packaging/linux/package-docs-test.sh` checks the real Linux staging/tar commands,
+AppDir retention and both Flatpak manifests' install commands with fixture binaries and
+stubbed AppImage tooling. Packaging lint runs it through `extra-checks-script`; it does not
+compile Rust, build a real AppImage, or run a Flatpak sandbox.
 
 ### FreeBSD
 
@@ -336,9 +452,11 @@ caching, the iframe snippet and the `?webgl` / `?cpu` flags.
 ## Secrets
 
 All secrets live in the repository's **`release` environment** (*Settings → Environments →
-release*). Restrict its deployment branches to `release`. Every job in `release.yml` that
-signs or publishes declares `environment: release` (the Flatpak and FreeBSD jobs sign nothing
-and don't), so only pushes to that branch, or manual runs on it, can read the secrets. Each secret is optional. If one is missing, that platform's artifacts are unsigned and
+release*). Restrict its deployment branches to `release` and the nightly signer's
+`nightly-signer`. Every job in the shared stable `release.yml` that signs or publishes binds the
+environment only for a non-dry run on `refs/heads/release` (the Flatpak and FreeBSD jobs sign
+nothing and don't), so only stable runs on that branch, or the pinned nightly signer on
+`nightly-signer`, can read the secrets. Each secret is optional. If one is missing, that platform's artifacts are unsigned and
 the run shows a `::warning::`.
 
 | Secret | Used for |
